@@ -8,4 +8,4 @@ These are all garbage code I threw together for fun
 
 **image_support.js** -> scans for messages starting with "!i!u|" and renders them inline with chat. For example `i!u|www.whatever.com/someimage.jpg` would render www.whatever.com/someimage.jpg
 
-**memes.js** -> scans for messages starting with `!meme!` and replaces them with urls to the meme. For example, `!meme!elmo!` gets replaced with `!i!u|https://media.tenor.com/jDYNnTW0v9gAAAAM/hellfire.gif`. If you are ALSO running the image script, it would then render an image of the elmo meme.
+**memes.js** -> scans for messages starting with `!meme!` and replaces them with urls to the meme. For example, `!meme!elmo` gets replaced with `!i!u|https://media.tenor.com/jDYNnTW0v9gAAAAM/hellfire.gif`. If you are ALSO running the image script, it would then render an image of the elmo meme.

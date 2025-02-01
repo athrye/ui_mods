@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Lichess Chat Time Request Handler
 // @namespace    http://tampermonkey.net/
-// @version      0.1
-// @description  Handles time addition requests in Lichess chat
+// @version      0.2
+// @description  Handles time addition requests in Lichess chat with support for specific color targeting
 // @match        https://lichess.org/*
 // @grant        none
 // ==/UserScript==
@@ -17,7 +17,7 @@
     const STORAGE_KEY = 'lichessTimeRequestsProcessed';  // localStorage key
     const debug = (...args) => DEBUG && console.log('[TimeRequest]', ...args);
 
-    // Time request marker
+    // Time request markers
     const TIME_TAG = '!t!';
     const TIME_INCREMENT = 15; // Lichess uses 15-second increments
 
@@ -39,6 +39,39 @@
         } catch (e) {
             debug('Error saving processed messages:', e);
         }
+    }
+
+    // Get the color this browser is playing
+    function getMyColor() {
+        // First try to get color from the clock positions
+        const bottomClock = document.querySelector('.rclock-bottom');
+        if (bottomClock) {
+            const isWhite = bottomClock.classList.contains('rclock-white');
+            const isBlack = bottomClock.classList.contains('rclock-black');
+            debug('Clock-based color detection:', { isWhite, isBlack });
+            if (isWhite) return 'white';
+            if (isBlack) return 'black';
+        }
+
+        // Fallback: check user position (bottom player is always the current user)
+        const bottomPlayer = document.querySelector('.ruser-bottom');
+        const topPlayer = document.querySelector('.ruser-top');
+        if (bottomPlayer && topPlayer) {
+            // Check if bottom player has a link that matches our username
+            const username = document.body.getAttribute('data-user');
+            const bottomUsername = bottomPlayer.querySelector('.user-link[href*="' + username + '"]');
+
+            if (bottomUsername) {
+                // If we're on bottom, check the top clock color to determine our color
+                const topClock = document.querySelector('.rclock-top');
+                const isBlackTop = topClock && topClock.classList.contains('rclock-black');
+                debug('Player position-based color detection:', { username, isBottom: true, isBlackTop });
+                return isBlackTop ? 'white' : 'black';
+            }
+        }
+
+        debug('Could not determine color');
+        return null;
     }
 
     // Generate a unique ID for a message based on content and position
@@ -67,18 +100,25 @@
         return results;
     }
 
-    // Parse time request (e.g., "!t!+90" -> 90)
+    // Parse time request (e.g., "!t!w+90" -> {target: "white", seconds: 90})
     function parseTimeRequest(text) {
         if (!text.startsWith(TIME_TAG)) return null;
 
-        const timeStr = text.slice(TIME_TAG.length).trim();
-        if (!timeStr.match(/^\+?\d+$/)) return null;
+        const requestText = text.slice(TIME_TAG.length).trim();
+        const match = requestText.match(/^(w|b|bw|wb)?\+?(\d+)$/);
+        if (!match) return null;
 
-        const seconds = parseInt(timeStr.replace('+', ''), 10);
+        const [, target, secondsStr] = match;
+        const seconds = parseInt(secondsStr, 10);
         if (isNaN(seconds) || seconds <= 0) return null;
 
         // Enforce maximum time limit
-        return Math.min(seconds, MAX_SECONDS);
+        const limitedSeconds = Math.min(seconds, MAX_SECONDS);
+
+        return {
+            target: target || 'other', // Default to old behavior
+            seconds: limitedSeconds
+        };
     }
 
     // Round up to nearest increment
@@ -113,6 +153,25 @@
         return roundedSeconds;
     }
 
+    // Determine if we should process this time request
+    function shouldProcessRequest(target, myColor) {
+        debug('Processing request:', { target, myColor });
+
+        switch (target) {
+            case 'w':
+                return myColor === 'black'; // Black gives time to white
+            case 'b':
+                return myColor === 'white'; // White gives time to black
+            case 'bw':
+            case 'wb':
+                return true; // Both players give time (either order)
+            case 'other':
+                return true; // Original behavior
+            default:
+                return false;
+        }
+    }
+
     // Process a time request node
     function processTimeRequest(node) {
         // Generate unique ID for this message
@@ -128,19 +187,33 @@
         const parentEl = node.parentElement;
         if (!parentEl) return;
 
-        const seconds = parseTimeRequest(node.nodeValue);
-        if (!seconds) return;
+        const myColor = getMyColor();
+        if (!myColor) {
+            debug('Could not determine my color');
+            return;
+        }
+
+        const request = parseTimeRequest(node.nodeValue);
+        if (!request) return;
+
+        debug('Parsed request:', request);
+
+        // Check if we should process this request
+        if (!shouldProcessRequest(request.target, myColor)) {
+            debug('Skipping request - not for my color');
+            return;
+        }
 
         // Mark as processed both in DOM and storage
         processedMessages.add(messageId);
         saveProcessedMessages();
 
         // Add the time and get actual amount added
-        const addedSeconds = addTime(seconds);
+        const addedSeconds = addTime(request.seconds);
 
         // Visual feedback with amount actually added
         const originalColor = parentEl.style.color;
-        const wasLimited = seconds > MAX_SECONDS;
+        const wasLimited = request.seconds > MAX_SECONDS;
 
         parentEl.style.color = wasLimited ? 'orange' : 'green';
         if (wasLimited) {
@@ -178,7 +251,7 @@
     function init() {
         periodicTimeScanner();
         cleanupOldMessages();
-        debug('Initialized Time Request Handler');
+        debug('Initialized Time Request Handler v0.2');
     }
 
     if (document.readyState === 'loading') {

@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Enhanced Lichess Style Randomizer
+// @name         Lichess Style Randomizer
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.2
 // @description  Adds buttons to randomize Lichess piece sets and board backgrounds with additional auto-randomize options
 // @author       You
 // @match        https://lichess.org/*
@@ -31,19 +31,19 @@
     // Style history
     let styleHistory = [];
     let currentStyleIndex = -1;
-    
+
     // Auto-randomize settings
     let randomizeOnMyMove = false;
     let randomizeOnOpponentMove = false;
-    
+
     // Game state tracking
     let lastMoveElement = null;
     let lastMoveData = null;
     let lastMoveCount = 0;
     let myColor = null;
-    let weAreWhite = true; 
+    let weAreWhite = true;
     let currentPly = -1;
-    
+
     // Function to set piece set
     function setPieceSet(pieceSet) {
         // Get current asset URL from the page
@@ -64,14 +64,6 @@
     function setBoardTheme(boardTheme) {
         // Update the data attribute for the board theme
         document.body.setAttribute('data-board', boardTheme);
-
-        // Force a redraw of the board
-        const board = document.querySelector('cg-board');
-        if (board) {
-            const currentDisplay = board.style.display;
-            board.style.display = 'none';
-            setTimeout(() => { board.style.display = currentDisplay; }, 0);
-        }
     }
 
     // Function to randomly select a style and apply it
@@ -104,6 +96,9 @@
 
         // Update button states
         updateButtonStates();
+
+        // IMPORTANT: Don't force a board redraw, as this can cause pieces to get stuck
+        // Instead, rely on Lichess's own style update mechanisms
     }
 
     // Function to go back to the previous style
@@ -142,16 +137,16 @@
         if (nextBtn) {
             nextBtn.disabled = currentStyleIndex >= styleHistory.length - 1;
         }
-        
+
         if (myMoveCheck) {
             myMoveCheck.checked = randomizeOnMyMove;
         }
-        
+
         if (opponentMoveCheck) {
             opponentMoveCheck.checked = randomizeOnOpponentMove;
         }
     }
-    
+
     // Detect if we're playing as black or white
     function detectPlayerColor() {
         // First check the board orientation
@@ -159,9 +154,11 @@
         if (boardElement) {
             if (boardElement.classList.contains('orientation-white')) {
                 weAreWhite = true;
+                console.log('[Style Randomizer] Detected playing as White');
                 return;
             } else if (boardElement.classList.contains('orientation-black')) {
                 weAreWhite = false;
+                console.log('[Style Randomizer] Detected playing as Black');
                 return;
             }
         }
@@ -174,43 +171,49 @@
         if (moveElements.length > 0) {
             return moveElements.length;
         }
-        
+
         // Try alternate selectors if the above didn't work
         const altMoveElements = document.querySelectorAll('l4x kwdb, l4x move');
         if (altMoveElements.length > 0) {
             return altMoveElements.length;
         }
-        
+
         return 0;
     }
-    
+
     // Check if a move has been made
     function checkForMoves() {
         // Get the current move count
         const currentMoveCount = getActualMoveCount();
-        
+
         // If the move count has changed
         if (currentMoveCount > lastMoveCount) {
             // A move has been made
             const movesMade = currentMoveCount - lastMoveCount;
-            
+
             // Update our tracking variable
             lastMoveCount = currentMoveCount;
-            
+
             // Get the current ply (half-move) count
-            // In chess, white's move + black's move = 1 full move
-            // So moveCount*2 would be the expected ply if both sides moved, 
-            // but we need to adjust based on who's to move now
             currentPly += movesMade;
-            
-            // Calculate which side moved based on ply count
-            const whiteJustMoved = (currentPly % 2 === 0); // white moves on odd plies (0-based)
-            
-            // Determine if it was my move or opponent's move
-            const wasMyMove = (weAreWhite && whiteJustMoved) || (!weAreWhite && !whiteJustMoved);
-            
-            console.log(`[Style Randomizer] Move detected: ${wasMyMove ? 'My move' : 'Opponent move'}`);
-            
+
+            // Determine if it was my move or opponent's move based on who is moving now
+            // In chess, white moves on even plies (0, 2, 4...) and black on odd plies (1, 3, 5...)
+            // We need to find out if the current turn belongs to us or opponent
+
+            // First determine whose turn it is now (after the observed move)
+            // If currentPly is even, it's white's turn; if odd, it's black's turn
+            const isWhiteTurn = (currentPly % 2 === 0);
+
+            // Now determine if the player who just moved was us or opponent
+            // If it's white's turn now, black just moved, and vice versa
+            const wasWhiteMove = !isWhiteTurn; // If white's turn now, black just moved
+
+            // Check if it was my move by comparing my color with who just moved
+            const wasMyMove = (weAreWhite === wasWhiteMove);
+
+            console.log(`[Style Randomizer] Move detected: Current ply ${currentPly}, ${wasWhiteMove ? 'White' : 'Black'} just moved, ${wasMyMove ? 'My move' : 'Opponent move'}`);
+
             // Trigger randomize based on settings
             if (wasMyMove && randomizeOnMyMove) {
                 randomizeStyle();
@@ -219,13 +222,13 @@
             }
         }
     }
-    
+
     // Toggle randomize on my move
     function toggleRandomizeOnMyMove() {
         randomizeOnMyMove = !randomizeOnMyMove;
         updateButtonStates();
     }
-    
+
     // Toggle randomize on opponent move
     function toggleRandomizeOnOpponentMove() {
         randomizeOnOpponentMove = !randomizeOnOpponentMove;
@@ -312,11 +315,11 @@
     function createInterface() {
         const container = document.createElement('div');
         container.id = 'style-randomizer-container';
-        
+
         // Buttons container
         const buttonsContainer = document.createElement('div');
         buttonsContainer.id = 'style-randomizer-buttons';
-        
+
         // Create navigation buttons
         const backBtn = document.createElement('button');
         backBtn.id = 'style-back-btn';
@@ -337,58 +340,58 @@
         nextBtn.title = 'Next style';
         nextBtn.disabled = true;
         nextBtn.addEventListener('click', nextStyle);
-        
+
         // Add buttons to the buttons container
         buttonsContainer.appendChild(backBtn);
         buttonsContainer.appendChild(randomizeBtn);
         buttonsContainer.appendChild(nextBtn);
-        
+
         // Create options container
         const optionsContainer = document.createElement('div');
         optionsContainer.id = 'style-randomizer-options';
-        
+
         // Create my move option
         const myMoveOption = document.createElement('div');
         myMoveOption.className = 'style-option';
-        
+
         const myMoveCheck = document.createElement('input');
         myMoveCheck.type = 'checkbox';
         myMoveCheck.id = 'randomize-my-move';
         myMoveCheck.checked = randomizeOnMyMove;
         myMoveCheck.addEventListener('change', toggleRandomizeOnMyMove);
-        
+
         const myMoveLabel = document.createElement('label');
         myMoveLabel.htmlFor = 'randomize-my-move';
         myMoveLabel.textContent = 'Randomize on my move';
-        
+
         myMoveOption.appendChild(myMoveCheck);
         myMoveOption.appendChild(myMoveLabel);
-        
+
         // Create opponent move option
         const opponentMoveOption = document.createElement('div');
         opponentMoveOption.className = 'style-option';
-        
+
         const opponentMoveCheck = document.createElement('input');
         opponentMoveCheck.type = 'checkbox';
         opponentMoveCheck.id = 'randomize-opponent-move';
         opponentMoveCheck.checked = randomizeOnOpponentMove;
         opponentMoveCheck.addEventListener('change', toggleRandomizeOnOpponentMove);
-        
+
         const opponentMoveLabel = document.createElement('label');
         opponentMoveLabel.htmlFor = 'randomize-opponent-move';
         opponentMoveLabel.textContent = 'Randomize on opponent move';
-        
+
         opponentMoveOption.appendChild(opponentMoveCheck);
         opponentMoveOption.appendChild(opponentMoveLabel);
-        
+
         // Add options to the options container
         optionsContainer.appendChild(myMoveOption);
         optionsContainer.appendChild(opponentMoveOption);
-        
+
         // Add containers to the main container
         container.appendChild(buttonsContainer);
         container.appendChild(optionsContainer);
-        
+
         document.body.appendChild(container);
     }
 
@@ -399,32 +402,58 @@
             setTimeout(() => {
                 // Initialize the interface
                 createInterface();
-                
+
                 // Initialize style history with current style
                 const currentPieceSet = document.body.getAttribute('data-piece-set') || 'cburnett';
                 const currentBoardTheme = document.body.getAttribute('data-board') || 'brown';
-                
+
                 styleHistory.push({ pieceSet: currentPieceSet, boardTheme: currentBoardTheme });
                 currentStyleIndex = 0;
-                
+
                 // Detect player color
                 detectPlayerColor();
-                
+
                 // Initialize the move count and ply count
                 lastMoveCount = getActualMoveCount();
-                // Estimate current ply from move count (a rough approximation)
-                currentPly = lastMoveCount * 2 - (weAreWhite ? 1 : 0);
-                
+
+                // Estimate current ply from move count
+                // Each full move is 2 plies (white move + black move)
+                // At the start of a game the currentPly should be 0
+                // If we join mid-game, we need to calculate the proper ply
+                currentPly = lastMoveCount * 2;
+
+                // If the last move count is not 0 (we joined an ongoing game),
+                // determine whose turn it is now
+                if (lastMoveCount > 0) {
+                    // Check whose turn it is based on move elements
+                    // This assumes standard game where white goes first
+                    const moveElements = document.querySelectorAll('kwdb, move');
+                    if (moveElements.length > 0) {
+                        // If the number of moves is odd, then black has the move
+                        // If even, white has the move
+                        const isWhiteTurn = (moveElements.length % 2 === 0);
+
+                        // Adjust ply count based on current turn
+                        // If it's white's turn, the ply is even (0, 2, 4...)
+                        // If it's black's turn, the ply is odd (1, 3, 5...)
+                        if (isWhiteTurn && currentPly % 2 !== 0) {
+                            currentPly--;
+                        } else if (!isWhiteTurn && currentPly % 2 === 0) {
+                            currentPly--;
+                        }
+                    }
+                }
+
                 console.log(`[Style Randomizer] Initialized: ${weAreWhite ? 'Playing as White' : 'Playing as Black'}, starting at move ${lastMoveCount}, ply ${currentPly}`);
-                
+
                 // Set up monitoring for moves
                 setInterval(checkForMoves, 500);
-                
+
                 // Also set up mutation observer for move list updates
                 const observer = new MutationObserver(function() {
                     checkForMoves();
                 });
-                
+
                 // Target the move list container
                 const moveContainer = document.querySelector('l4x') || document.body;
                 observer.observe(moveContainer, {
